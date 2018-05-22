@@ -809,6 +809,19 @@ select_ename_from_iname
     return 0;
 }
 
+
+db_reply_t
+    create_or_update_asset (fty_proto_t *fmsg, bool test)
+{
+    db_reply_t ret = db_reply_new ();
+
+    tntdb::Connection conn = tntdb::connectCached (url);
+    tntdb::Statement statement;
+
+
+    return ret;
+}
+
 /**
  *  \brief Inserts data from create/update message into DB
  *
