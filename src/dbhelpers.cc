@@ -27,8 +27,17 @@
 */
 
 #include "fty_asset_classes.h"
-#define INPUT_POWER_CHAIN     1
+#define INPUT_POWER_CHAIN 1
 
+// to be moved to fty-common
+static std::vector<std::string> ASSET_ELEMENT_KEYTAGS{
+    "id", "name", "type", "sub_type", "location", "status", "priority", "asset_tag"};
+
+
+// read-only attributes inserted by system
+static std::vector<std::string> RO_EXT_ATT_cpp {"create_user", "create_mode", "uuid"};
+
+const char *RO_EXT_ATT [3] = {"create_user", "create_mode", "uuid"};
 /**
  *  \brief Converts asset name to the DB id
  *
@@ -809,16 +818,90 @@ select_ename_from_iname
     return 0;
 }
 
-
+/* rc-0 custom is normal device cr/upd, autodiscovered all RO,
+   everything else - custom, cr/upd */
 db_reply_t
     create_or_update_asset (fty_proto_t *fmsg, bool test)
 {
-    db_reply_t ret = db_reply_new ();
+    zhash_t *ext = fty_proto_get_ext (fmsg);
+    zhash_t *ext_ro = zhash_new ();
+
+    for (void *it = zhash_first (ext);
+         it != NULL;
+         it =  zhash_next (ext))
+     {
+         for (int i = 0; i < sizeof (RO_EXT_ATT)/sizeof (char *); i++)
+         {
+             if (strcmp (zhash_cursor (ext), RO_EXT_ATT [i]) == 0) {
+                 zhash_insert (ext_ro, zhash_cursor (ext), it);
+                 zsys_debug ("insering to ro %s - %s", zhash_cursor (ext), (char *)it);
+                 //                 zhash_delete (ext, zhash_cursor (ext));
+                 //zsys_debug ("deleting to ro %s - %s", zhash_cursor (ext), (char *)it);
+             }
+             else
+                 zsys_debug ("stais in rw %s - %s", zhash_cursor (ext), (char *)it);
+
+         }
+     }
+    zsys_debug ("########name %s", fty_proto_name (fmsg));
 
     tntdb::Connection conn = tntdb::connectCached (url);
     tntdb::Statement statement;
+    db_reply_t ret = db_reply_new ();
+    if (test) {
+        ret.status = 1;
+        return ret;
+    }
+
+    if (strcmp (fty_proto_operation (fmsg), "create") == 0)
+    {
+        statement = conn.prepareCached (
+                " INSERT INTO t_bios_asset_element "
+                " (name, id_type, id_subtype, id_parent, status, priority, asset_tag) "
+                " VALUES "
+                " (concat (:name, '-@@-', " + std::to_string (rand ())  + "), :id_type, :id_subtype, :id_parent, :status, :priority, :asset_tag) "
+            );
+
+        ret.affected_rows = statement.
+            set ("name", fty_proto_aux_string (fmsg, "type", "")).
+            set ("id_type", type_to_typeid (fty_proto_aux_string (fmsg, "type", ""))).
+            set ("id_subtype", subtype_to_subtypeid (fty_proto_aux_string (fmsg, "subtype", ""))).
+            setNull ("id_parent").
+            set ("status", fty_proto_aux_string (fmsg, "status", "nonactive")).
+            set ("priority", fty_proto_aux_number (fmsg, "priority", 5)).
+            set ("asset_tag", "").
+            execute();
+
+            ret.rowid = conn.lastInsertId ();
+            zsys_debug ("[t_bios_asset_element]: was inserted %" PRIu64 " rows", ret.affected_rows);
+
+            statement = conn.prepareCached (
+                " UPDATE t_bios_asset_element "
+                "  set name = concat(:name, '-', :id) "
+                " WHERE id_asset_element = :id "
+            );
+            statement.set ("name", fty_proto_aux_string (fmsg, "subtype", "")).
+                set ("id", ret.rowid).
+                execute();
+
+            fty_proto_set_name (fmsg, "%s-%" PRIu64, fty_proto_aux_string (fmsg, "subtype", ""), ret.rowid);
+
+        //exts
+        int rv = process_insert_inventory (fty_proto_name (fmsg),
+                                           ext,
+                                           false, false); // rw on create
+        rv = process_insert_inventory (fty_proto_name (fmsg),
+                                       ext_ro,
+                                       true, false); // ro on create
 
 
+    }
+    else
+        zsys_debug ("### updt igonred");
+
+    zhash_destroy (&ext);
+    zhash_destroy (&ext_ro);
+    fty_proto_destroy (&fmsg);
     return ret;
 }
 

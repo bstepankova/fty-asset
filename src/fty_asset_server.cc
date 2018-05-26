@@ -740,22 +740,7 @@ static void
         zmsg_destroy (&reply);
         return;
     }
-    else {
-        if (streq (read_only_str, "READONLY")) {
-            read_only = true;
-        }
-        else if (streq (read_only_str, "READWRITE")) {
-            read_only = false;
-        }
-        else {
-            zmsg_addstr (reply, "ERROR");
-            zmsg_addstr (reply, "BAD_COMMAND");
-            mlm_client_sendto (cfg->mailbox_client, mlm_client_sender (cfg->mailbox_client), "ASSET_MANIPULATION", NULL, 5000, &reply);
-            zstr_free (&read_only_str);
-            zmsg_destroy (&reply);
-            return;
-        }
-    }
+
 
     if (!is_fty_proto (zmessage)) {
         zsys_error ("%s:\tASSET_MANIPULATION: receiver message is not fty_proto", cfg->name);
@@ -772,7 +757,7 @@ static void
     const char *operation = fty_proto_operation (fmsg);
 
     if (streq (operation, "create") || streq (operation, "update")) {
-            db_reply_t dbreply = create_or_update_asset (fmsg, read_only, cfg->test);
+            db_reply_t dbreply = create_or_update_asset (fmsg, cfg->test);
             if (! dbreply.status) {
                 zsys_error ("Failed to create asset!");
                 fty_proto_print (fmsg);
